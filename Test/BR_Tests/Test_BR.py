@@ -73,7 +73,7 @@ BR_Vars_Base.Is = 0      # Average Solar Insolation kWh/m^2/yr
 BR_Vars_Base.E0 = 2.3E+3   # Minimum Energy kWh/Tonne
 BR_Vars_Base.PPFD_ENERGY = 0.5 ## Required PPFD in kW/tonne/yr 
 BR_Vars_Base.LED_Cost = 170 ## cost for 5W LED
-BR_Vars_Base.trials = 1000
+BR_Vars_Base.trials = 500
 BR_Vars_Base.D = 1  # Reactor Height m
 BR_Vars_Base.assign_err(value=0.5)
 
@@ -170,6 +170,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import LogLocator
 
+from scipy import stats
+import pandas as pd
+
 def plot_violin(data, title, ylabel, filename, type=None):
     data = np.asarray(data) / 1E+6
     plt.figure(figsize=(6, 6))
@@ -233,7 +236,62 @@ def plot_violin(data, title, ylabel, filename, type=None):
     plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.3)
     plt.tight_layout()
     plt.savefig(filename, dpi=600)
-#    plt.show()
+    
+    from statsmodels.stats.multicomp import pairwise_tukeyhsd
+    import pingouin as pg
+
+    log_filename = os.path.splitext(filename)[0] + "_log.txt"
+
+    # Create DataFrame for data
+    df = pd.DataFrame(data, columns=configurations)
+    df = df.melt(var_name='group', value_name='value')
+
+    # Perform Welch's ANOVA
+    anova_results = pg.welch_anova(dv='value', between='group', data=df)
+    p_val = anova_results['p-unc'][0]
+
+    with open(log_filename, "w") as log_file:
+        log_file.write(f"Welch's ANOVA result: p-value: {p_val:.3e}\n")
+        print(f"Welch's ANOVA result: p-value: {p_val:.3e}")
+
+        if p_val < 0.05:
+            log_file.write("ANOVA is significant. Performing Games-Howell post-hoc tests...\n")
+            print("ANOVA is significant. Performing Games-Howell post-hoc tests...")
+
+            # Perform Games-Howell Post-Hoc test
+            post_hoc_results = pg.pairwise_gameshowell(dv='value', between='group', data=df)
+
+            # Compute probability P(A > B) and P(B > A)
+            for i in range(len(post_hoc_results)):
+                group_a = df[df['group'] == post_hoc_results.at[i, 'A']]['value'].values
+                group_b = df[df['group'] == post_hoc_results.at[i, 'B']]['value'].values
+                prob_a_gt_b, prob_b_gt_a = bootstrap_probability_greater(group_a, group_b)
+                post_hoc_results.at[i, 'P(A>B)'] = prob_a_gt_b
+                post_hoc_results.at[i, 'P(B>A)'] = prob_b_gt_a
+
+            # Format p-values and probabilities in scientific notation
+            post_hoc_results['pval'] = post_hoc_results['pval'].apply(lambda x: f"{max(x, 1e-300):.3e}")
+            post_hoc_results['P(A>B)'] = post_hoc_results['P(A>B)'].astype(float).apply(lambda x: f"{x:.3e}")
+            post_hoc_results['P(B>A)'] = post_hoc_results['P(B>A)'].astype(float).apply(lambda x: f"{x:.3e}")
+
+            log_file.write("Games-Howell Post-Hoc Test Results:\n")
+            log_file.write(post_hoc_results.to_string(index=False) + "\n")
+            print(post_hoc_results)
+        else:
+            log_file.write("No significant differences found. No post-hoc test needed.\n")
+
+    print(f"Results saved in {log_filename}")
+
+
+from itertools import combinations
+
+def bootstrap_probability_greater(a, b, n_bootstrap=10000):
+    """Compute the probability that mean(a) > mean(b) using bootstrapping."""
+    boot_means_a = np.random.choice(a, n_bootstrap, replace=True)
+    boot_means_b = np.random.choice(b, n_bootstrap, replace=True)
+    
+    prob_a_gt_b = np.mean(boot_means_a > boot_means_b)  # P(A > B)
+    return f"{prob_a_gt_b:.3e}", f"{1 - prob_a_gt_b:.3e}"  # Returns P(A > B) and P(B > A)
 
 
 def adjacent_values(vals, q1, q3):
@@ -316,6 +374,10 @@ configurations = MC_costs['CONFIG']
 CAPEX_raw_data = np.transpose(MC_costs['CAPEX_RAW'])
 OPEX_raw_data = np.transpose(MC_costs['OPEX_RAW'])
 
+# Violin plots
+plot_violin(CAPEX_raw_data, 'Violin Plot of CAPEX for Each Configuration', 'CAPEX/ M£', Cur_folder+'CAPEX_violin_plot.png',type='Log')
+plot_violin(OPEX_raw_data, 'Violin Plot of OPEX for Each Configuration', 'OPEX/ M£/yr', Cur_folder+'OPEX_violin_plot.png',type='Log')
+
 # Plant scale range
 N0_range = np.arange(500, 2000, 50)
 
@@ -345,10 +407,6 @@ for config_index, config in enumerate(configurations):
 
 # Custom color palette
 custom_palette = sns.color_palette("tab10", n_colors=len(configurations))
-
-# Violin plots
-plot_violin(CAPEX_raw_data, 'Violin Plot of CAPEX for Each Configuration', 'CAPEX/ M£', Cur_folder+'CAPEX_violin_plot.png',type='Log')
-plot_violin(OPEX_raw_data, 'Violin Plot of OPEX for Each Configuration', 'OPEX/ M£/yr', Cur_folder+'OPEX_violin_plot.png',type='Log')
 
 # Line plots
 plot_line(N0_range, CAPEX_scale_dict, configurations, 'CAPEX vs. Plant Scale for Each Configuration', 'Plant Scale/ Tonnes/yr)', 'CAPEX/ M£', Cur_folder+'CAPEX_vs_Plant_Scale.png',type='Log')
