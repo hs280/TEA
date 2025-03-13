@@ -73,7 +73,7 @@ BR_Vars_Base.Is = 0      # Average Solar Insolation kWh/m^2/yr
 BR_Vars_Base.E0 = 2.3E+3   # Minimum Energy kWh/Tonne
 BR_Vars_Base.PPFD_ENERGY = 0.5 ## Required PPFD in kW/tonne/yr 
 BR_Vars_Base.LED_Cost = 170 ## cost for 5W LED
-BR_Vars_Base.trials = 500
+BR_Vars_Base.trials = 5000
 BR_Vars_Base.D = 1  # Reactor Height m
 BR_Vars_Base.assign_err(value=0.5)
 
